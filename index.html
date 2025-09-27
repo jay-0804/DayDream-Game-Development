@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alien Sacrifice Adventure Pro</title>
+<style>
+body {margin:0; font-family:Arial,sans-serif; background:#0b0b0b; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; user-select:none;}
+#game-container {position:relative; width:100vw; max-width:900px; height:75vh; border:3px solid #fff; border-radius:15px; overflow:hidden; background:linear-gradient(to bottom,#111,#222);}
+.player {position:absolute; width:50px; height:60px; top:50%; left:5%; transform:translateY(-50%); z-index:10;}
+.player-inner {width:100%; height:100%; border-radius:50% 50% 45% 45% / 60% 60% 40% 40%; background:radial-gradient(circle at 30% 30%, #4caf50,#1b5e20); border:2px solid #fff; animation:bob 1s ease-in-out infinite; box-shadow:0 0 15px #4caf50;}
+@keyframes bob {0%,100%{transform:translateY(0);}50%{transform:translateY(-5%);}}
+.coin {position:absolute; width:25px; height:25px; background:gold; border-radius:50%; animation:spin 1s linear infinite; box-shadow:0 0 10px gold;}
+@keyframes spin {0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+.obstacle {position:absolute; width:40px; height:40px; background:red; border-radius:10px; transform-origin:center; box-shadow:0 0 10px #f00;}
+.gate {position:absolute; width:60px; height:100px; right:20px; top:50%; transform:translateY(-50%); background:brown; border:2px solid #fff; transition:transform 0.5s ease, background 0.5s;}
+.gate.open {transform:translateY(-50%) scale(1.3); background:#8b4513;}
+#info {margin-top:10px; font-size:16px; text-align:center;}
+#controls {display:flex; justify-content:space-around; margin-top:10px;}
+.control-btn {width:60px; height:60px; border-radius:50%; background:#4caf50; border:none; color:white; font-size:20px; cursor:pointer; box-shadow:0 0 5px #000;}
+.control-btn:active {background:#2e7d32;}
+.message {position:absolute; width:100%; text-align:center; top:10px; font-size:18px; color:#FFD700; animation:fadeout 1.5s forwards;}
+@keyframes fadeout {0%{opacity:1;}100%{opacity:0;}}
+.particle {position:absolute; width:6px; height:6px; border-radius:50%; pointer-events:none; animation:fadeParticle 0.5s forwards;}
+@keyframes fadeParticle {0%{opacity:1;}100%{opacity:0; transform:translateY(-20px);}}
+</style>
+</head>
+<body>
+<div>
+<div id="game-container">
+  <div class="player" id="player"><div class="player-inner"></div></div>
+</div>
+<div id="info">Coins: 0 | Required: 3 | Level: 1 | Time: 60s</div>
+<div id="controls">
+  <button class="control-btn" id="up">▲</button>
+  <button class="control-btn" id="left">◀</button>
+  <button class="control-btn" id="down">▼</button>
+  <button class="control-btn" id="right">▶</button>
+</div>
+<button id="restart">Restart</button>
+<audio id="coinSound" src="https://assets.mixkit.co/sfx/preview/mixkit-video-game-coin-2063.mp3"></audio>
+<audio id="gateSound" src="https://assets.mixkit.co/sfx/preview/mixkit-video-game-win-2017.mp3"></audio>
+<audio id="bgMusic" src="https://assets.mixkit.co/music/preview/mixkit-epic-fantasy-1123.mp3" loop></audio>
+</div>
+<script>
+const container=document.getElementById("game-container"),
+      player=document.getElementById("player"),
+      info=document.getElementById("info"),
+      restartBtn=document.getElementById("restart"),
+      upBtn=document.getElementById("up"),
+      downBtn=document.getElementById("down"),
+      leftBtn=document.getElementById("left"),
+      rightBtn=document.getElementById("right"),
+      coinSound=document.getElementById("coinSound"),
+      gateSound=document.getElementById("gateSound"),
+      bgMusic=document.getElementById("bgMusic");
+
+let coinsCollected=0, level=1, timer, coins=[], obstacles=[], gate, timerInterval, gameOver=false, levelComplete=false, levelNames=["Alien Trials","Meteor Maze","Cosmic Rush","Nebula Nightmare","Final Sacrifice"];
+
+const levelConfig={
+  1:{coins:3,obstacles:1,speed:1,time:60},
+  2:{coins:5,obstacles:2,speed:2,time:50},
+  3:{coins:7,obstacles:3,speed:2.5,time:45},
+  4:{coins:9,obstacles:3,speed:3,time:40},
+  5:{coins:12,obstacles:3,speed:3.5,time:35,gateMoving:true} // max obstacles capped
+};
+
+function randomPos(maxW,maxH){return {x:Math.random()*maxW,y:Math.random()*maxH};}
+function showMessage(msg){const div=document.createElement("div");div.className="message";div.innerText=msg;container.appendChild(div);setTimeout(()=>container.removeChild(div),1500);}
+function circleRectCollision(cx,cy,r,rect){const rx=parseFloat(rect.style.left),ry=parseFloat(rect.style.top),rw=rect.offsetWidth,rh=rect.offsetHeight;let closestX=Math.max(rx,Math.min(cx,rx+rw));let closestY=Math.max(ry,Math.min(cy,ry+rh));let dx=cx-closestX,dy=cy-closestY;return(dx*dx+dy*dy)<r*r;}
+function createParticle(x,y){for(let i=0;i<10;i++){const p=document.createElement("div");p.className="particle";p.style.left=x+"px";p.style.top=y+"px";p.style.background=["#FFD700","#FF4500","#FFFF00"][Math.floor(Math.random()*3)];container.appendChild(p);setTimeout(()=>container.removeChild(p),500);}}
+function createCoin(){const coin=document.createElement("div");coin.classList.add("coin");const pos=randomPos(container.offsetWidth-25,container.offsetHeight-25);coin.style.left=pos.x+"px";coin.style.top=pos.y+"px";container.appendChild(coin);coins.push(coin);}
+function createObstacle(){obstacles=[];for(let i=0;i<levelConfig[level].obstacles;i++){const obs=document.createElement("div");obs.classList.add("obstacle");const pos=randomPos(container.offsetWidth-40,container.offsetHeight-40);obs.style.left=pos.x+"px";obs.style.top=pos.y+"px";obs.dataset.dx=Math.random()<0.5?1:-1;obs.dataset.dy=Math.random()<0.5?1:-1;container.appendChild(obs);obstacles.push(obs);}}
+function createGate(){gate=document.createElement("div");gate.classList.add("gate");container.appendChild(gate);}
+function updateInfo(){info.innerText=`Coins: ${coinsCollected} | Required: ${levelConfig[level].coins} | Level: ${level} - ${levelNames[level-1]} | Time: ${timer}s`;}
+
+// Start level
+function startLevel(){
+  levelComplete = false;
+  coinsCollected=0; gameOver=false;
+  container.innerHTML=""; coins=[]; obstacles=[]; player.style.top="50%"; player.style.left="5%"; container.appendChild(player);
+  createGate();
+  for(let i=0;i<levelConfig[level].coins+2;i++) createCoin();
+  createObstacle();
+  timer=levelConfig[level].time;
+  updateInfo();
+  showMessage(`Level ${level} - ${levelNames[level-1]}!`);
+  if(timerInterval) clearInterval(timerInterval);
+  timerInterval=setInterval(()=>{if(!gameOver){timer--;updateInfo();if(timer<=0){gameOver=true; showMessage("Time up! Game Over!"); clearInterval(timerInterval);}}},1000);
+  bgMusic.play();
+}
+
+// Animate obstacles and gate
+function animateObjects(){
+  if(gameOver) return;
+  const playerRadius=25;
+  obstacles.forEach(obs=>{
+    let x=parseFloat(obs.style.left),y=parseFloat(obs.style.top);
+    let dx=parseFloat(obs.dataset.dx)*levelConfig[level].speed;
+    let dy=parseFloat(obs.dataset.dy)*levelConfig[level].speed;
+    if(x+dx<0||x+dx>container.offsetWidth-40) obs.dataset.dx*=-1;
+    if(y+dy<0||y+dy>container.offsetHeight-40) obs.dataset.dy*=-1;
+    obs.style.left=x+dx+"px"; obs.style.top=y+dy+"px";
+    const cx=parseFloat(player.style.left)+25,cy=parseFloat(player.style.top)+30;
+    if(circleRectCollision(cx,cy,playerRadius,obs) && !levelComplete){if(coinsCollected>0) coinsCollected--;updateInfo();showMessage("Ouch! Lost a coin!");}
+  });
+
+  if(levelConfig[level].gateMoving){
+    let gateX=parseFloat(gate.style.left||container.offsetWidth-80);
+    let gateDir=gate.dataset.dir||"left";
+    if(gateDir==="left"){gateX-=2;if(gateX<container.offsetWidth-300) gate.dataset.dir="right";} else {gateX+=2;if(gateX>container.offsetWidth-80) gate.dataset.dir="left";}
+    gate.style.left=gateX+"px";
+  }
+
+  requestAnimationFrame(animateObjects);
+}
+
+// Move player and handle collisions
+function movePlayer(dir){
+  if(gameOver) return;
+  let top=parseFloat(player.style.top),left=parseFloat(player.style.left);
+  if(dir==="up"&&top>0) player.style.top=top-10+"px";
+  if(dir==="down"&&top<container.offsetHeight-60) player.style.top=top+10+"px";
+  if(dir==="left"&&left>0) player.style.left=left-10+"px";
+  if(dir==="right"&&left<container.offsetWidth-50) player.style.left=left+10+"px";
+
+  const cx=parseFloat(player.style.left)+25,cy=parseFloat(player.style.top)+30;
+
+  for(let i=coins.length-1;i>=0;i--){
+    const c=coins[i],cX=parseFloat(c.style.left)+12.5,cY=parseFloat(c.style.top)+12.5;
+    if(Math.hypot(cx-cX,cy-cY)<25){
+      container.removeChild(c); coins.splice(i,1); coinsCollected++; updateInfo(); showMessage("Coin collected!"); coinSound.play(); createParticle(cX,cY);
+    }
+  }
+
+  const gateRect=gate.getBoundingClientRect();
+  const containerRect=container.getBoundingClientRect();
+  const px=cx+containerRect.left, py=cy+containerRect.top;
+  if(px>gateRect.left && px<gateRect.right && py>gateRect.top && py<gateRect.bottom && !levelComplete){
+    if(coinsCollected>=levelConfig[level].coins){
+      gate.classList.add("open"); coinsCollected-=levelConfig[level].coins; updateInfo(); levelComplete=true; showMessage("Level Complete!"); gateSound.play();
+      clearInterval(timerInterval);
+      setTimeout(()=>{if(level<5){level++; startLevel();} else {gameOver=true; showMessage("You beat all levels!");}},1500);
+    } else {showMessage(`Need ${levelConfig[level].coins} coins to open!`);}
+  }
+
+  if(coins.length + coinsCollected < levelConfig[level].coins && !gameOver && !levelComplete){
+    gameOver=true; clearInterval(timerInterval); showMessage("Not enough coins left! Game Over!");
+  }
+}
+
+// Controls
+document.addEventListener("keydown",e=>{if(e.key==="ArrowUp") movePlayer("up");if(e.key==="ArrowDown") movePlayer("down");if(e.key==="ArrowLeft") movePlayer("left");if(e.key==="ArrowRight") movePlayer("right");});
+upBtn.onclick=()=>movePlayer("up");downBtn.onclick=()=>movePlayer("down");leftBtn.onclick=()=>movePlayer("left");rightBtn.onclick=()=>movePlayer("right");
+restartBtn.onclick=()=>{coinsCollected=0;level=1;gameOver=false;startLevel();};
+
+// Swipe controls for mobile
+let touchStartX=0,touchStartY=0;
+container.addEventListener("touchstart",e=>{touchStartX=e.touches[0].clientX; touchStartY=e.touches[0].clientY;});
+container.addEventListener("touchend",e=>{
+  let dx=e.changedTouches[0].clientX-touchStartX, dy=e.changedTouches[0].clientY-touchStartY;
+  if(Math.abs(dx)>Math.abs(dy)){dx>0?movePlayer("right"):movePlayer("left");} else {dy>0?movePlayer("down"):movePlayer("up");}
+});
+
+startLevel();
+animateObjects();
+</script>
+</body>
+</html>
